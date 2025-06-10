@@ -51,36 +51,62 @@ app.get('/', (req, res) => {
 
 //return all thoughts
 app.get('/thoughts', async (req, res) => {
-  const thoughts = await HappyThoughts.find().sort({ createdAt: -1 }).limit(20);
-  res.json(thoughts);
+  try {
+    const thoughts = await HappyThoughts.find()
+      .sort({ createdAt: -1 })
+      .limit(20);
+    if (thoughts.length > 0) {
+      return res.json(thoughts);
+    } else {
+      res.status(404).json({ error: 'No thoughts available' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid request' });
+  }
 });
 
 // return a random thought (has to be placed before the id route)
-app.get('/thoughts/random', (req, res) => {
-  const randomIndex = Math.floor(Math.random() * happythoughtsData.length);
-  const randomThought = happythoughtsData[randomIndex];
+app.get('/thoughts/random', async (req, res) => {
+  try {
+    const count = await HappyThoughts.countDocuments();
+    if (count === 0) {
+      return res.status(404).json({ error: 'No thoughts' });
+    }
+    const random = Math.floor(Math.random() * count);
+    const randomThought = await HappyThoughts.findOne().skip(random);
 
-  res.json(randomThought);
+    res.json(randomThought);
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid request' });
+  }
 });
 
 //return all thoughts sorted by likes (most likes on top)(has to be placed before the id route)
-app.get('/thoughts/likes', (req, res) => {
-  const sortedThoughts = [...happythoughtsData].sort(
-    (a, b) => b.hearts - a.hearts
-  );
-  res.json(sortedThoughts);
+app.get('/thoughts/likes', async (req, res) => {
+  try {
+    const sortedThoughts = await HappyThoughts.find().sort({ hearts: -1 });
+    if (sortedThoughts.length > 0) {
+      res.json(sortedThoughts);
+    } else {
+      res.status(404).json({ error: 'No thoughts' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid request' });
+  }
 });
 
 // return a specific thought by id
-app.get('/thoughts/:id', (req, res) => {
+app.get('/thoughts/:id', async (req, res) => {
   const { id } = req.params;
-
-  const thought = happythoughtsData.find((thought) => thought._id === +id);
-
-  if (thought) {
-    res.json(thought);
-  } else {
-    res.status(404).json({ error: 'No thoughts' });
+  try {
+    const thought = await HappyThoughts.findById(id);
+    if (thought) {
+      res.json(thought);
+    } else {
+      res.status(404).json({ error: 'No thoughts' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid ID format' });
   }
 });
 
@@ -90,7 +116,9 @@ app.post('/thoughts', async (req, res) => {
 
     // Basic manual validation (mongoose also validates)
     if (!message) {
-      return res.status(400).json({ error: 'Thought is required' });
+      return res
+        .status(400)
+        .json({ error: 'Your thought is invalid, please try again.' });
     }
 
     const newThought = new HappyThoughts({
@@ -107,7 +135,21 @@ app.post('/thoughts', async (req, res) => {
   }
 });
 
-// Start the server
+app.delete('/thoughts/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const deletedThought = await HappyThoughts.findByIdAndDelete(id);
+    if (deletedThought) {
+      res.json({ message: 'Thought deleted', thought: deletedThought });
+    } else {
+      res.status(404).json({ error: 'Thought not found' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
+});
+
+// Start the servers
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
