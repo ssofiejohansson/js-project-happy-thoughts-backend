@@ -2,11 +2,13 @@ import cors from 'cors';
 import express from 'express';
 import fs from 'fs';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
+import bcrypt from 'bcrypt-nodejs';
 
 // Defines the port the app will run on. Defaults to 8080, but can be overridden
 // when starting the server. Example command to overwrite PORT env variable value:
 // PORT=9000 npm start
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 8081;
 const app = express();
 
 const happythoughtsData = JSON.parse(fs.readFileSync('./data.json', 'utf-8'));
@@ -16,7 +18,42 @@ const happyThoughtsSchema = new mongoose.Schema({
   message: { type: String, required: true },
   hearts: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
+  username: { type: String, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 });
+
+const userSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    unique: true,
+    required: true,
+  },
+  password: {
+    type: String,
+    required: true,
+  },
+  accessToken: {
+    type: String,
+    default: () => crypto.randomBytes(128).toString('hex'),
+  },
+});
+
+const User = mongoose.model('User', userSchema);
+
+const authenticateUser = async (req, res, next) => {
+  const user = await User.findOne({
+    accessToken: req.header('Authorization'),
+  });
+
+  if (user) {
+    req.user = user;
+    next();
+  } else {
+    res.status(401).json({
+      loggedOut: true,
+    });
+  }
+};
 
 // Create Mongoose model
 const HappyThoughts = mongoose.model('HappyThoughts', happyThoughtsSchema);
@@ -110,8 +147,28 @@ app.get('/thoughts/:id', async (req, res) => {
   }
 });
 
+app.get('/users', async (req, res) => {
+  try {
+    const users = await User.find().sort({ createdAt: -1 });
+    if (users.length > 0) {
+      res.json(users);
+    } else {
+      res.status(404).json({ error: 'No users found' });
+    }
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid request' });
+  }
+});
+
 app.post('/thoughts', async (req, res) => {
   try {
+    const accessToken = req.header('Authorization');
+    const user = await User.findOne({ accessToken });
+
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     const { message } = req.body;
 
     // Basic manual validation (mongoose also validates)
@@ -126,6 +183,7 @@ app.post('/thoughts', async (req, res) => {
       hearts: 0,
       createdAt: new Date(),
     });
+
     const savedThought = await newThought.save();
 
     res.status(201).json(savedThought);
@@ -137,16 +195,158 @@ app.post('/thoughts', async (req, res) => {
 
 app.delete('/thoughts/:id', async (req, res) => {
   const { id } = req.params;
+
   try {
-    const deletedThought = await HappyThoughts.findByIdAndDelete(id);
-    if (deletedThought) {
-      res.json({ message: 'Thought deleted', thought: deletedThought });
+    // Authenticate user
+    const accessToken = req.header('Authorization');
+    const user = await User.findOne({ accessToken });
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Find the thought
+    const thought = await HappyThoughts.findById(id);
+    if (!thought) {
+      return res.status(404).json({ error: 'Thought not found' });
+    }
+
+    // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
+    if (thought.user && thought.user.toString() !== user._id.toString()) {
+      return res.status(403).json({ error: 'Forbidden: Not your thought' });
+    }
+
+    await HappyThoughts.findByIdAndDelete(id);
+
+    res.json({ message: 'Thought deleted', thought });
+  } catch (error) {
+    console.error('Error deleting thought:', error);
+    res.status(400).json({ error: 'Invalid ID format or deletion error' });
+  }
+});
+
+app.put('/thoughts/:id/', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Authenticate user
+    const accessToken = req.header('Authorization');
+    const user = await User.findOne({ accessToken });
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
     } else {
-      res.status(404).json({ error: 'Thought not found' });
+      // Find the thought
+      const thought = await HappyThoughts.findById(id);
+      if (!thought) {
+        return res.status(404).json({ error: 'Thought not found' });
+      }
+
+      // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
+      if (thought.user && thought.user.toString() !== user._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: Not your thought' });
+      }
+
+      const { message } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: 'Message is required' });
+      }
+
+      thought.message = message;
+      await thought.save();
+
+      res.json({ message: 'Thought updated', thought });
     }
   } catch (error) {
-    res.status(400).json({ error: 'Invalid ID format' });
+    console.error('Error updating thought:', error);
+    res.status(400).json({ error: 'Invalid ID format or update error' });
   }
+});
+
+app.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required',
+      });
+    }
+
+    const user = await User.findOne({ username });
+
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      id: user._id,
+      accessToken: user.accessToken,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      errors: error,
+    });
+  }
+});
+
+app.post('/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required',
+      });
+    }
+
+    const existUsername = await User.findOne({ username });
+    if (existUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username already taken',
+      });
+    }
+
+    const salt = bcrypt.genSaltSync();
+    const user = new User({
+      username,
+      password: bcrypt.hashSync(password, salt),
+    });
+
+    await user.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'User created',
+      id: user._id,
+      accessToken: user.accessToken,
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      // Duplicate key error from MongoDB
+      return res.status(400).json({
+        success: false,
+        message: 'Username already taken',
+      });
+    }
+    res.status(400).json({
+      success: false,
+      message: 'Could not create user',
+      errors: error,
+    });
+  }
+});
+
+app.get('/secrets', authenticateUser, (req, res) => {
+  res.json({ secret: 'this is a secret message.' });
 });
 
 // Start the servers
