@@ -5,9 +5,6 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt-nodejs';
 
-// Defines the port the app will run on. Defaults to 8080, but can be overridden
-// when starting the server. Example command to overwrite PORT env variable value:
-// PORT=9000 npm start
 const port = process.env.PORT || 8081;
 const app = express();
 
@@ -34,6 +31,7 @@ const userSchema = new mongoose.Schema({
   },
   accessToken: {
     type: String,
+    required: true,
     default: () => crypto.randomBytes(128).toString('hex'),
   },
 });
@@ -41,21 +39,29 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 const authenticateUser = async (req, res, next) => {
-  const user = await User.findOne({
-    accessToken: req.header('Authorization'),
-  });
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: 'No access token provided' });
+  }
+  // Accept either "Bearer <token>" or just "<token>"
+  const accessToken = authHeader.startsWith('Bearer ')
+    ? authHeader.replace('Bearer ', '')
+    : authHeader;
 
-  if (user) {
+  try {
+    const user = await User.findOne({ accessToken });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ message: 'You need to login or sign up to post a thought' });
+    }
     req.user = user;
     next();
-  } else {
-    res.status(401).json({
-      loggedOut: true,
-    });
+  } catch (error) {
+    return res.status(401).json({ message: 'Invalid access token' });
   }
 };
 
-// Create Mongoose model
 const HappyThoughts = mongoose.model('HappyThoughts', happyThoughtsSchema);
 
 // Connect to MongoDB
@@ -74,7 +80,7 @@ if (process.env.RESET_DB) {
     }
   };
 
-  seedDatabase(); // ✅ calling the async function
+  seedDatabase();
 }
 
 // Add middlewares to enable cors and json body parsing
@@ -160,18 +166,10 @@ app.get('/users', async (req, res) => {
   }
 });
 
-app.post('/thoughts', async (req, res) => {
+app.post('/thoughts', authenticateUser, async (req, res) => {
   try {
-    const accessToken = req.header('Authorization');
-    const user = await User.findOne({ accessToken });
-
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { message } = req.body;
 
-    // Basic manual validation (mongoose also validates)
     if (!message) {
       return res
         .status(400)
@@ -182,6 +180,8 @@ app.post('/thoughts', async (req, res) => {
       message,
       hearts: 0,
       createdAt: new Date(),
+      username: req.user.username,
+      userId: req.user._id, // <-- use _id instead of id
     });
 
     const savedThought = await newThought.save();
@@ -193,25 +193,27 @@ app.post('/thoughts', async (req, res) => {
   }
 });
 
-app.delete('/thoughts/:id', async (req, res) => {
+app.delete('/thoughts/:id', authenticateUser, async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Authenticate user
-    const accessToken = req.header('Authorization');
-    const user = await User.findOne({ accessToken });
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // Find the thought
     const thought = await HappyThoughts.findById(id);
     if (!thought) {
       return res.status(404).json({ error: 'Thought not found' });
     }
 
-    // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
-    if (thought.user && thought.user.toString() !== user._id.toString()) {
+    // Add this log:
+    console.log(
+      'Thought userId:',
+      thought.userId,
+      'Request user id:',
+      req.user._id
+    );
+
+    if (
+      thought.userId &&
+      thought.userId.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({ error: 'Forbidden: Not your thought' });
     }
 
@@ -224,37 +226,29 @@ app.delete('/thoughts/:id', async (req, res) => {
   }
 });
 
-app.put('/thoughts/:id/', async (req, res) => {
+app.put('/thoughts/:id/', authenticateUser, async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Authenticate user
-    const accessToken = req.header('Authorization');
-    const user = await User.findOne({ accessToken });
-    if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    } else {
-      // Find the thought
-      const thought = await HappyThoughts.findById(id);
-      if (!thought) {
-        return res.status(404).json({ error: 'Thought not found' });
-      }
-
-      // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
-      if (thought.user && thought.user.toString() !== user._id.toString()) {
-        return res.status(403).json({ error: 'Forbidden: Not your thought' });
-      }
-
-      const { message } = req.body;
-      if (!message) {
-        return res.status(400).json({ error: 'Message is required' });
-      }
-
-      thought.message = message;
-      await thought.save();
-
-      res.json({ message: 'Thought updated', thought });
+    const thought = await HappyThoughts.findById(id);
+    if (!thought) {
+      return res.status(404).json({ error: 'Thought not found' });
     }
+
+    // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
+    if (thought.userId && thought.userId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: Not your thought' });
+    }
+
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    thought.message = message;
+    await thought.save();
+
+    res.json({ message: 'Thought updated', thought });
   } catch (error) {
     console.error('Error updating thought:', error);
     res.status(400).json({ error: 'Invalid ID format or update error' });
@@ -323,6 +317,7 @@ app.post('/register', async (req, res) => {
 
     await user.save();
 
+    // Return the user's accessToken (not a JWT)
     res.status(201).json({
       success: true,
       message: 'User created',
@@ -331,7 +326,6 @@ app.post('/register', async (req, res) => {
     });
   } catch (error) {
     if (error.code === 11000) {
-      // Duplicate key error from MongoDB
       return res.status(400).json({
         success: false,
         message: 'Username already taken',
@@ -349,7 +343,6 @@ app.get('/secrets', authenticateUser, (req, res) => {
   res.json({ secret: 'this is a secret message.' });
 });
 
-// Start the servers
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });
