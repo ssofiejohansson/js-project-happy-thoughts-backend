@@ -17,6 +17,12 @@ const happyThoughtsSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   username: { type: String, required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  likedBy: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+  ],
 });
 
 const userSchema = new mongoose.Schema({
@@ -124,19 +130,19 @@ app.get('/thoughts/random', async (req, res) => {
   }
 });
 
-//return all thoughts sorted by likes (most likes on top)(has to be placed before the id route)
-app.get('/thoughts/likes', async (req, res) => {
-  try {
-    const sortedThoughts = await HappyThoughts.find().sort({ hearts: -1 });
-    if (sortedThoughts.length > 0) {
-      res.json(sortedThoughts);
-    } else {
-      res.status(404).json({ error: 'No thoughts' });
-    }
-  } catch (error) {
-    res.status(400).json({ error: 'Invalid request' });
-  }
-});
+// //return all thoughts sorted by likes (most likes on top)(has to be placed before the id route)
+// app.get('/thoughts/likes', async (req, res) => {
+//   try {
+//     const sortedThoughts = await HappyThoughts.find().sort({ hearts: -1 });
+//     if (sortedThoughts.length > 0) {
+//       res.json(sortedThoughts);
+//     } else {
+//       res.status(404).json({ error: 'No thoughts' });
+//     }
+//   } catch (error) {
+//     res.status(400).json({ error: 'Invalid request' });
+//   }
+// });
 
 // return a specific thought by id
 app.get('/thoughts/:id', async (req, res) => {
@@ -226,8 +232,9 @@ app.delete('/thoughts/:id', authenticateUser, async (req, res) => {
   }
 });
 
-app.put('/thoughts/:id/', authenticateUser, async (req, res) => {
+app.put('/thoughts/:id', authenticateUser, async (req, res) => {
   const { id } = req.params;
+  const { message } = req.body;
 
   try {
     const thought = await HappyThoughts.findById(id);
@@ -235,14 +242,18 @@ app.put('/thoughts/:id/', authenticateUser, async (req, res) => {
       return res.status(404).json({ error: 'Thought not found' });
     }
 
-    // OPTIONAL: Check if the user owns the thought (requires a user ref in HappyThoughts)
-    if (thought.userId && thought.userId.toString() !== req.user.id) {
+    // Only allow the owner to edit
+    if (
+      thought.userId &&
+      thought.userId.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({ error: 'Forbidden: Not your thought' });
     }
 
-    const { message } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+    if (!message || message.length < 5 || message.length > 140) {
+      return res
+        .status(400)
+        .json({ error: 'Message must be 5-140 characters.' });
     }
 
     thought.message = message;
@@ -341,6 +352,42 @@ app.post('/register', async (req, res) => {
 
 app.get('/secrets', authenticateUser, (req, res) => {
   res.json({ secret: 'this is a secret message.' });
+});
+
+app.post('/thoughts/:id/likes', authenticateUser, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user._id;
+
+  try {
+    const thought = await HappyThoughts.findById(id);
+    if (!thought) {
+      return res.status(404).json({ error: 'Thought not found' });
+    }
+
+    // Only add if not already liked
+    if (!thought.likedBy.some((uid) => uid.equals(userId))) {
+      thought.likedBy.push(userId);
+      thought.hearts += 1;
+      await thought.save();
+    }
+
+    res.json(thought);
+  } catch (error) {
+    console.error('Error liking thought:', error);
+    res.status(400).json({ error: 'Invalid ID format or like error' });
+  }
+});
+
+app.get('/thoughts/likes', authenticateUser, async (req, res) => {
+  try {
+    const likedThoughts = await HappyThoughts.find({
+      likedBy: req.user._id, // <- req.user is set by authenticateUser
+    });
+    res.json(likedThoughts);
+  } catch (error) {
+    console.error('Error fetching liked thoughts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.listen(port, () => {
