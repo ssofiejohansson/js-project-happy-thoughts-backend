@@ -73,12 +73,12 @@ const HappyThoughts = mongoose.model('HappyThoughts', happyThoughtsSchema);
 
 // Connect to MongoDB
 mongoose.connect(
-  import.meta.env.MONGO_URL || 'mongodb://localhost/happythoughts'
+  process.env.MONGO_URL || 'mongodb://localhost/happythoughts'
 );
 mongoose.Promise = Promise;
 
 // RESET_DB logic
-if (import.meta.env.RESET_DB) {
+if (process.env.RESET_DB) {
   const seedDatabase = async () => {
     console.log('Resetting database!');
     await HappyThoughts.deleteMany();
