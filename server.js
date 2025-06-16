@@ -4,6 +4,7 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt-nodejs';
+import listEndpoints from 'express-list-endpoints';
 
 const port = import.meta.env.PORT || 8081;
 const app = express();
@@ -385,6 +386,10 @@ app.get('/thoughts/likes', authenticateUser, async (req, res) => {
     console.error('Error fetching liked thoughts:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.get('/endpoints', (req, res) => {
+  res.send(listEndpoints(app));
 });
 
 app.listen(port, () => {
