@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt-nodejs';
 
-const port = process.env.PORT || 8081;
+const port = import.meta.env.PORT || 8081;
 const app = express();
 
 const happythoughtsData = JSON.parse(fs.readFileSync('./data.json', 'utf-8'));
@@ -71,11 +71,11 @@ const authenticateUser = async (req, res, next) => {
 const HappyThoughts = mongoose.model('HappyThoughts', happyThoughtsSchema);
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URL || 'mongodb://localhost/happythoughts');
+mongoose.connect(import.meta.env.MONGO_URL || 'mongodb://localhost/happythoughts');
 mongoose.Promise = Promise;
 
 // RESET_DB logic
-if (process.env.RESET_DB) {
+if (import.meta.env.RESET_DB) {
   const seedDatabase = async () => {
     console.log('Resetting database!');
     await HappyThoughts.deleteMany();
