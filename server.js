@@ -4,6 +4,7 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 import bcrypt from 'bcrypt-nodejs';
+import listEndpoints from 'express-list-endpoints';
 
 const port = process.env.PORT || 8081;
 const app = express();
@@ -94,6 +95,10 @@ app.use(cors());
 app.use(express.json());
 
 // Start defining your routes here
+
+app.get('/', (req, res) => {
+  res.send(listEndpoints(app));
+});
 
 //return all thoughts
 app.get('/thoughts', async (req, res) => {
