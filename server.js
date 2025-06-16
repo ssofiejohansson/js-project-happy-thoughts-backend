@@ -96,10 +96,6 @@ app.use(express.json());
 
 // Start defining your routes here
 
-app.get('/', (req, res) => {
-  res.send(listEndpoints(app));
-});
-
 //return all thoughts
 app.get('/thoughts', async (req, res) => {
   try {
@@ -390,6 +386,10 @@ app.get('/thoughts/likes', authenticateUser, async (req, res) => {
     console.error('Error fetching liked thoughts:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.get('/', (req, res) => {
+  res.send(listEndpoints(app));
 });
 
 app.listen(port, () => {
