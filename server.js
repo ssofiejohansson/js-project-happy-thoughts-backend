@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt-nodejs';
 import listEndpoints from 'express-list-endpoints';
 
-const port = import.meta.env.PORT || 8081;
+const port = process.env.PORT || 8081;
 const app = express();
 
 const happythoughtsData = JSON.parse(fs.readFileSync('./data.json', 'utf-8'));
@@ -72,7 +72,9 @@ const authenticateUser = async (req, res, next) => {
 const HappyThoughts = mongoose.model('HappyThoughts', happyThoughtsSchema);
 
 // Connect to MongoDB
-mongoose.connect(import.meta.env.MONGO_URL || 'mongodb://localhost/happythoughts');
+mongoose.connect(
+  import.meta.env.MONGO_URL || 'mongodb://localhost/happythoughts'
+);
 mongoose.Promise = Promise;
 
 // RESET_DB logic
