@@ -388,7 +388,7 @@ app.get('/thoughts/likes', authenticateUser, async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
+app.get('/endpoints', (req, res) => {
   res.send(listEndpoints(app));
 });
 
